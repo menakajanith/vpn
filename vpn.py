@@ -1,90 +1,69 @@
-import requests
-import ipaddress
+import dns.resolver
 import socket
-import subprocess
 
-# 1. HTTP Response Check
-def check_http_response(url):
+# Function to get both IP and DNS records
+def get_domain_info(domain):
     try:
-        response = requests.get(url)
-        return f"HTTP Status Code for {url}: {response.status_code}"
-    except requests.RequestException as e:
-        return f"Error checking {url}: {e}"
+        # Get A records (IP addresses)
+        a_records = dns.resolver.resolve(domain, 'A')
+        ip_addresses = [str(record) for record in a_records]
+        
+        # Get additional DNS records (e.g., MX, TXT, etc.)
+        dns_records = {}
+        
+        # MX (Mail Exchange) records
+        try:
+            mx_records = dns.resolver.resolve(domain, 'MX')
+            dns_records['MX'] = [str(record.exchange) for record in mx_records]
+        except dns.resolver.NoAnswer:
+            dns_records['MX'] = None
+        
+        # TXT (Text) records
+        try:
+            txt_records = dns.resolver.resolve(domain, 'TXT')
+            dns_records['TXT'] = [str(record) for record in txt_records]
+        except dns.resolver.NoAnswer:
+            dns_records['TXT'] = None
+        
+        # AAAA (IPv6) records
+        try:
+            aaaa_records = dns.resolver.resolve(domain, 'AAAA')
+            dns_records['AAAA'] = [str(record) for record in aaaa_records]
+        except dns.resolver.NoAnswer:
+            dns_records['AAAA'] = None
+        
+        # CNAME (Canonical Name) records
+        try:
+            cname_records = dns.resolver.resolve(domain, 'CNAME')
+            dns_records['CNAME'] = [str(record.target) for record in cname_records]
+        except dns.resolver.NoAnswer:
+            dns_records['CNAME'] = None
+        
+        return ip_addresses, dns_records
 
-# 2. CIDR Subnet Scan
-def scan_cidr_subnet(cidr):
-    network = ipaddress.IPv4Network(cidr)
-    result = []
-    for ip in network.hosts():
-        result.append(f"Host: {ip}")
-    return "\n".join(result)
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN) as e:
+        return None, f"{domain} could not be resolved: {e}"
+    except Exception as e:
+        return None, f"Error resolving {domain}: {str(e)}"
 
-# 3. IP Range Scan
-def scan_ip_range(start_ip, end_ip):
-    start_parts = list(map(int, start_ip.split('.')))
-    end_parts = list(map(int, end_ip.split('.')))
-    result = []
-    for i in range(start_parts[3], end_parts[3] + 1):
-        ip = f"{start_parts[0]}.{start_parts[1]}.{start_parts[2]}.{i}"
-        result.append(f"IP: {ip}")
-    return "\n".join(result)
-
-# 4. Domain List Scanner
-def domain_list_scanner(domain_list):
+# Function to display domain information
+def domain_list_scanner_with_details(domain_list):
     result = []
     for domain in domain_list:
-        try:
-            ip = socket.gethostbyname(domain)
-            result.append(f"{domain} resolved to {ip}")
-        except socket.gaierror:
-            result.append(f"{domain} could not be resolved")
+        ip_addresses, dns_records = get_domain_info(domain)
+        
+        if ip_addresses:
+            result.append(f"{domain} resolved to IP addresses: {', '.join(ip_addresses)}")
+            for record_type, records in dns_records.items():
+                if records:
+                    result.append(f"{domain} {record_type} records: {', '.join(records)}")
+                else:
+                    result.append(f"{domain} {record_type} records not found.")
+        else:
+            result.append(dns_records)  # Error message when domain can't be resolved
+    
     return "\n".join(result)
 
-# 5. Site Ping
-def ping_site(site):
-    try:
-        response = subprocess.run(["ping", "-c", "4", site], capture_output=True, text=True)
-        if response.returncode == 0:
-            return f"{site} is reachable"
-        else:
-            return f"{site} is unreachable"
-    except Exception as e:
-        return f"Error pinging {site}: {e}"
-
-# Main function for interactive menu
-def main():
-    while True:
-        print("\nSelect an option:")
-        print("1. HTTP Response Check")
-        print("2. CIDR Subnet Scan")
-        print("3. IP Range Scan")
-        print("4. Domain List Scanner")
-        print("5. Site Ping")
-        print("6. Exit")
-
-        choice = input("\nEnter your choice: ")
-
-        if choice == '1':
-            url = input("Enter URL to check HTTP Response: ")
-            print(check_http_response(url))
-        elif choice == '2':
-            cidr = input("Enter CIDR Subnet to scan (e.g., 192.168.1.0/24): ")
-            print(scan_cidr_subnet(cidr))
-        elif choice == '3':
-            start_ip = input("Enter start IP (e.g., 192.168.1.1): ")
-            end_ip = input("Enter end IP (e.g., 192.168.1.10): ")
-            print(scan_ip_range(start_ip, end_ip))
-        elif choice == '4':
-            domains = input("Enter comma-separated domain names: ").split(',')
-            print(domain_list_scanner([domain.strip() for domain in domains]))
-        elif choice == '5':
-            site = input("Enter a site to ping (e.g., google.com): ")
-            print(ping_site(site))
-        elif choice == '6':
-            print("Exiting the program...")
-            break
-        else:
-            print("Invalid option. Please try again.")
-
-if __name__ == "__main__":
-    main()
+# Testing with domains
+domains = ["google.com", "example.com", "nonexistentdomain.com"]
+print(domain_list_scanner_with_details(domains))
